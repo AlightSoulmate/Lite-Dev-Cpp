@@ -84,16 +84,25 @@ jobs:
       - build-windows
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Collect release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -name "*.zip" -exec cp {} release-assets/ \;
+          ls -la release-assets
 
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
-          gh release create "$TAG_NAME" artifacts/**/*.zip \
+          gh release create "$TAG_NAME" release-assets/*.zip \
             --title "Lite Dev-C++ $TAG_NAME" \
             --notes "Prebuilt Lite Dev-C++ packages for macOS and Windows."
