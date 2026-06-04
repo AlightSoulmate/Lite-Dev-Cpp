@@ -51,37 +51,11 @@ jobs:
           name: Lite-Dev-Cpp-macOS-universal
           path: Lite-Dev-Cpp-macOS-universal.zip
 
-  build-windows:
-    name: Build Windows
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Build release binary
-        run: cargo build --release
-
-      - name: Package Windows zip
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "dist/Lite-Dev-Cpp-windows-x86_64" | Out-Null
-          Copy-Item "target/release/lite-dev-cpp.exe" "dist/Lite-Dev-Cpp-windows-x86_64/Lite-Dev-Cpp.exe"
-          Copy-Item "README.md" "dist/Lite-Dev-Cpp-windows-x86_64/README.md"
-          Compress-Archive -Path "dist/Lite-Dev-Cpp-windows-x86_64/*" -DestinationPath "Lite-Dev-Cpp-windows-x86_64.zip" -Force
-
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Lite-Dev-Cpp-windows-x86_64
-          path: Lite-Dev-Cpp-windows-x86_64.zip
-
   publish-release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
     needs:
       - build-macos
-      - build-windows
 
     steps:
       - name: Checkout
@@ -105,4 +79,4 @@ jobs:
         run: |
           gh release create "$TAG_NAME" release-assets/*.zip \
             --title "Lite Dev-C++ $TAG_NAME" \
-            --notes "Prebuilt Lite Dev-C++ packages for macOS and Windows."
+            --notes "Prebuilt Lite Dev-C++ package for macOS."

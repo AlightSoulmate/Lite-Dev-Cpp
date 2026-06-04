@@ -1,6 +1,6 @@
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
-use eframe::egui;
+use eframe::egui::{self, FontData, FontDefinitions, FontFamily};
 
 use crate::core::{
     compiler::{BuildResult, CompilerService},
@@ -21,10 +21,12 @@ pub struct LiteDevCppApp {
 }
 
 impl LiteDevCppApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        configure_fonts(&cc.egui_ctx);
+        let config = AppConfig::load().unwrap_or_default();
         Self {
             project: None,
-            config: AppConfig::default(),
+            config,
             current_file: None,
             editor_text: String::new(),
             dirty: false,
@@ -42,10 +44,6 @@ impl LiteDevCppApp {
     fn open_folder(&mut self, folder: PathBuf) {
         match Project::open(folder.clone()) {
             Ok(project) => {
-                self.config = AppConfig::load_from_project(&folder).unwrap_or_else(|err| {
-                    self.push_output(format!("Could not load config: {err}"));
-                    AppConfig::default()
-                });
                 self.project = Some(project);
                 self.current_file = None;
                 self.editor_text.clear();
@@ -92,13 +90,8 @@ impl LiteDevCppApp {
         }
     }
 
-    fn save_project_config(&mut self) {
-        let Some(project) = self.project.as_ref() else {
-            self.push_output("Open a project folder before saving compiler settings.");
-            return;
-        };
-
-        match self.config.save_to_project(project.root()) {
+    fn save_app_config(&mut self) {
+        match self.config.save() {
             Ok(path) => self.push_output(format!("Saved config: {}", path.display())),
             Err(err) => self.push_output(format!("Could not save config: {err}")),
         }
@@ -121,10 +114,6 @@ impl LiteDevCppApp {
             self.save_current_file();
         }
 
-        let Some(project) = self.project.as_ref() else {
-            self.push_output("Open a project folder before building.");
-            return None;
-        };
         let Some(file) = self.current_file.as_ref() else {
             self.push_output("Open a C/C++ file before building.");
             return None;
@@ -136,7 +125,7 @@ impl LiteDevCppApp {
         }
 
         let service = CompilerService::new(self.config.compiler.clone());
-        match service.build_current_file(project.root(), file) {
+        match service.build_current_file(file) {
             Ok(result) => {
                 if result.exit_code == 0 {
                     self.last_executable = Some(result.executable.clone());
@@ -154,17 +143,17 @@ impl LiteDevCppApp {
     }
 
     fn run_last_executable(&mut self) {
-        let Some(project) = self.project.as_ref() else {
-            self.push_output("Open a project folder before running.");
-            return;
-        };
         let Some(executable) = self.last_executable.as_ref() else {
             self.push_output("Build the current file before running it.");
             return;
         };
+        let Some(working_dir) = executable.parent() else {
+            self.push_output("The executable path has no parent folder.");
+            return;
+        };
 
         let service = CompilerService::new(self.config.compiler.clone());
-        match service.run_executable_in_terminal(executable, project.root()) {
+        match service.run_executable_in_terminal(executable, working_dir) {
             Ok(()) => self.push_output(format!("Launched in terminal: {}", executable.display())),
             Err(err) => self.push_output(format!("Run failed: {err}")),
         }
@@ -237,7 +226,7 @@ impl LiteDevCppApp {
         compiler_field(ui, "C", &mut self.config.compiler.c_compiler);
         compiler_field(ui, "C++", &mut self.config.compiler.cpp_compiler);
         if ui.button("Save Config").clicked() {
-            self.save_project_config();
+            self.save_app_config();
         }
     }
 }
@@ -287,4 +276,42 @@ impl eframe::App for LiteDevCppApp {
 fn compiler_field(ui: &mut egui::Ui, label: &str, value: &mut String) {
     ui.label(label);
     ui.add(egui::TextEdit::singleline(value).desired_width(90.0));
+}
+
+fn configure_fonts(ctx: &egui::Context) {
+    let Some(font_bytes) = load_macos_system_cjk_font() else {
+        return;
+    };
+
+    let mut fonts = FontDefinitions::default();
+    fonts.font_data.insert(
+        "macos_cjk".to_owned(),
+        FontData::from_owned(font_bytes).into(),
+    );
+
+    for family in [FontFamily::Proportional, FontFamily::Monospace] {
+        fonts
+            .families
+            .entry(family)
+            .or_default()
+            .push("macos_cjk".to_owned());
+    }
+
+    ctx.set_fonts(fonts);
+}
+
+fn load_macos_system_cjk_font() -> Option<Vec<u8>> {
+    let candidates = [
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/Supplemental/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/System/Library/Fonts/Supplemental/Songti.ttc",
+        "/System/Library/Fonts/CJKSymbolsFallback.ttc",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/NISC18030.ttf",
+    ];
+
+    candidates.iter().find_map(|path| fs::read(path).ok())
 }

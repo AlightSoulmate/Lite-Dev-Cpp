@@ -24,15 +24,30 @@ pub fn show(ui: &mut egui::Ui, title: &str, text: &mut String, dirty: &mut bool)
         ui.fonts(|fonts| fonts.layout_job(job))
     };
 
-    let mut output = egui::TextEdit::multiline(text)
-        .id_salt("lite_dev_cpp_code_editor")
-        .font(TextStyle::Monospace)
-        .desired_width(f32::INFINITY)
-        .desired_rows(28)
-        .lock_focus(true)
-        .code_editor()
-        .layouter(&mut layouter)
-        .show(ui);
+    // Enable scrolling
+    let available_size = ui.available_size();
+    let desired_rows = text.lines().count().max(32);
+    let mut output = None;
+    egui::ScrollArea::both()
+        .id_salt("code_editor_scroll")
+        .auto_shrink([false, false])
+        .show_viewport(ui, |ui, _viewport| {
+            output = Some(
+                egui::TextEdit::multiline(text)
+                    .id_salt("lite_dev_cpp_code_editor")
+                    .font(TextStyle::Monospace)
+                    .desired_width(available_size.x.max(600.0))
+                    .desired_rows(desired_rows)
+                    .lock_focus(true)
+                    .code_editor()
+                    .layouter(&mut layouter)
+                    .show(ui),
+            );
+        });
+
+    let Some(mut output) = output else {
+        return;
+    };
 
     if output.response.changed() {
         if let Some(cursor_index) = output
@@ -52,6 +67,7 @@ pub fn show(ui: &mut egui::Ui, title: &str, text: &mut String, dirty: &mut bool)
     }
 }
 
+// Right parenthesis, right quotation marks auto-complete
 fn apply_edit_assists(before: &str, after: &mut String, cursor_index: usize) -> Option<usize> {
     let inserted = inserted_text(before, after)?;
     match inserted.as_str() {
@@ -163,6 +179,7 @@ fn byte_index_for_char(text: &str, char_index: usize) -> Option<usize> {
     text.char_indices().nth(char_index).map(|(index, _)| index)
 }
 
+// Code highlight
 fn highlight_cpp(ui: &egui::Ui, code: &str) -> LayoutJob {
     let font_id = FontId::monospace(15.0);
     let default = TextFormat::simple(font_id.clone(), ui.visuals().text_color());

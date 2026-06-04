@@ -3,6 +3,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+// File tree model
+
 #[derive(Debug, Clone)]
 pub struct Project {
     root: PathBuf,
@@ -77,5 +79,5 @@ fn read_children(root: &Path) -> io::Result<Vec<FileNode>> {
 }
 
 fn should_skip(name: &str) -> bool {
-    matches!(name, ".git" | "target")
+    matches!(name, ".git" | "target" | ".DS_Store" | "a")
 }

@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use eframe::egui;
 
 use crate::core::project::{FileNode, Project};
-use crate::utils::paths;
 
 pub fn show(
     ui: &mut egui::Ui,
@@ -42,16 +41,8 @@ fn show_node(
     }
 
     let selected = current_file.is_some_and(|path| path == node.path.as_path());
-    let label = if paths::is_supported_text_file(&node.path) {
-        node.name.clone()
-    } else {
-        format!("{} (read-only)", node.name)
-    };
-
-    let response = ui.selectable_label(selected, label);
+    let response = ui.selectable_label(selected, &node.name);
     if response.clicked() {
-        if paths::is_supported_text_file(&node.path) {
-            *selected_file = Some(node.path.clone());
-        }
+        *selected_file = Some(node.path.clone());
     }
 }

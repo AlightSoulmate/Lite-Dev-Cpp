@@ -1,9 +1,9 @@
-use std::{
-    fs, io,
-    path::{Path, PathBuf},
-};
+use std::{fs, io, path::PathBuf};
 
+use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
+
+// App and compiler config
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -20,10 +20,10 @@ pub struct CompilerConfig {
 }
 
 impl AppConfig {
-    pub const FILE_NAME: &'static str = "lite-dev-cpp.toml";
+    pub const FILE_NAME: &'static str = "config.toml";
 
-    pub fn load_from_project(project_root: &Path) -> io::Result<Self> {
-        let path = project_root.join(Self::FILE_NAME);
+    pub fn load() -> io::Result<Self> {
+        let path = Self::config_path()?;
         if !path.exists() {
             return Ok(Self::default());
         }
@@ -32,13 +32,16 @@ impl AppConfig {
         toml::from_str(&contents).map_err(|err| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("invalid project config: {err}"),
+                format!("invalid app config: {err}"),
             )
         })
     }
 
-    pub fn save_to_project(&self, project_root: &Path) -> io::Result<PathBuf> {
-        let path = project_root.join(Self::FILE_NAME);
+    pub fn save(&self) -> io::Result<PathBuf> {
+        let path = Self::config_path()?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
         let contents = toml::to_string_pretty(self).map_err(|err| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -47,6 +50,17 @@ impl AppConfig {
         })?;
         fs::write(&path, contents)?;
         Ok(path)
+    }
+
+    pub fn config_path() -> io::Result<PathBuf> {
+        ProjectDirs::from("dev", "LiteDevCpp", "Lite-Dev-Cpp")
+            .map(|dirs| dirs.config_dir().join(Self::FILE_NAME))
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "could not find the user config directory",
+                )
+            })
     }
 }
 
