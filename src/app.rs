@@ -1,13 +1,22 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use eframe::egui::{self, FontData, FontDefinitions, FontFamily};
 
 use crate::core::{
     compiler::{BuildResult, CompilerService},
     config::AppConfig,
+    file_ops,
     project::Project,
 };
-use crate::ui::{editor, file_tree, output_panel};
+use crate::ui::{
+    editor,
+    file_dialog::{self, DialogResponse, FileDialogKind, FileDialogState},
+    file_tree::{self, FileTreeAction},
+    output_panel,
+};
 use crate::utils::paths;
 
 pub struct LiteDevCppApp {
@@ -18,6 +27,8 @@ pub struct LiteDevCppApp {
     dirty: bool,
     output: String,
     last_executable: Option<PathBuf>,
+    file_dialog: Option<FileDialogState>,
+    delete_candidate: Option<PathBuf>,
 }
 
 impl LiteDevCppApp {
@@ -32,6 +43,8 @@ impl LiteDevCppApp {
             dirty: false,
             output: "Open a folder to begin.\n".to_owned(),
             last_executable: None,
+            file_dialog: None,
+            delete_candidate: None,
         }
     }
 
@@ -168,6 +181,133 @@ impl LiteDevCppApp {
         }
     }
 
+    fn handle_file_tree_action(&mut self, ctx: &egui::Context, action: FileTreeAction) {
+        match action {
+            FileTreeAction::Open(path) => self.open_file(path),
+            FileTreeAction::Reveal(path) => match file_ops::reveal_in_finder(&path) {
+                Ok(()) => self.push_output(format!("Revealed in Finder: {}", path.display())),
+                Err(err) => self.push_output(format!("Could not reveal in Finder: {err}")),
+            },
+            FileTreeAction::CopyPath(path) => {
+                ctx.copy_text(path.display().to_string());
+                self.push_output(format!("Copied path: {}", path.display()));
+            }
+            FileTreeAction::NewFile(dir) => self.start_new_file(dir),
+            FileTreeAction::NewFolder(dir) => self.start_new_folder(dir),
+            FileTreeAction::Rename(path) => self.start_rename(path),
+            FileTreeAction::Delete(path) => self.delete_candidate = Some(path),
+            FileTreeAction::Refresh => self.refresh_project(),
+        }
+    }
+
+    fn start_new_file(&mut self, dir: PathBuf) {
+        self.file_dialog = Some(FileDialogState {
+            kind: FileDialogKind::NewFile,
+            value: file_ops::unique_child_name(&dir, "untitled.cpp"),
+            target: dir,
+        });
+    }
+
+    fn start_new_folder(&mut self, dir: PathBuf) {
+        self.file_dialog = Some(FileDialogState {
+            kind: FileDialogKind::NewFolder,
+            value: file_ops::unique_child_name(&dir, "New Folder"),
+            target: dir,
+        });
+    }
+
+    fn start_rename(&mut self, path: PathBuf) {
+        let value = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        self.file_dialog = Some(FileDialogState {
+            kind: FileDialogKind::Rename,
+            target: path,
+            value,
+        });
+    }
+
+    fn apply_file_dialog(&mut self) {
+        let Some(dialog) = self.file_dialog.take() else {
+            return;
+        };
+        let name = dialog.value.trim();
+        if name.is_empty() {
+            self.push_output("Name cannot be empty.");
+            self.file_dialog = Some(dialog);
+            return;
+        }
+        if name.contains('/') {
+            self.push_output("Name cannot contain '/'.");
+            self.file_dialog = Some(dialog);
+            return;
+        }
+
+        let result = match dialog.kind {
+            FileDialogKind::NewFile => self.create_file(&dialog.target, name),
+            FileDialogKind::NewFolder => file_ops::create_folder(&dialog.target, name)
+                .map(|path| format!("Created folder: {}", path.display())),
+            FileDialogKind::Rename => self.rename_path(&dialog.target, name),
+        };
+
+        match result {
+            Ok(message) => {
+                self.push_output(message);
+                self.refresh_project();
+            }
+            Err(err) => {
+                self.push_output(err);
+                self.file_dialog = Some(dialog);
+            }
+        }
+    }
+
+    fn create_file(&mut self, dir: &Path, name: &str) -> Result<String, String> {
+        let path = file_ops::create_file(dir, name)?;
+        self.open_file(path.clone());
+        Ok(format!("Created file: {}", path.display()))
+    }
+
+    fn rename_path(&mut self, path: &Path, new_name: &str) -> Result<String, String> {
+        let new_path = file_ops::rename_path(path, new_name)?;
+
+        if self.current_file.as_deref() == Some(path) {
+            self.current_file = Some(new_path.clone());
+            self.last_executable = None;
+        }
+
+        Ok(format!(
+            "Renamed {} to {}",
+            path.display(),
+            new_path.display()
+        ))
+    }
+
+    fn confirm_delete_candidate(&mut self) {
+        let Some(path) = self.delete_candidate.take() else {
+            return;
+        };
+
+        match file_ops::move_to_trash(&path) {
+            Ok(()) => {
+                if self
+                    .current_file
+                    .as_deref()
+                    .is_some_and(|file| file_ops::path_contains(&path, file))
+                {
+                    self.current_file = None;
+                    self.editor_text.clear();
+                    self.dirty = false;
+                    self.last_executable = None;
+                }
+                self.push_output(format!("Moved to Trash: {}", path.display()));
+                self.refresh_project();
+            }
+            Err(err) => self.push_output(format!("Could not move to Trash: {err}")),
+        }
+    }
+
     fn push_output(&mut self, message: impl AsRef<str>) {
         self.output.push_str(message.as_ref());
         self.output.push('\n');
@@ -229,6 +369,30 @@ impl LiteDevCppApp {
             self.save_app_config();
         }
     }
+
+    fn draw_file_dialog(&mut self, ctx: &egui::Context) {
+        let response = match self.file_dialog.as_mut() {
+            Some(dialog) => file_dialog::show_file_dialog(ctx, dialog),
+            None => None,
+        };
+        match response {
+            Some(DialogResponse::Apply) => self.apply_file_dialog(),
+            Some(DialogResponse::Cancel) => self.file_dialog = None,
+            None => {}
+        }
+    }
+
+    fn draw_delete_confirmation(&mut self, ctx: &egui::Context) {
+        let response = self
+            .delete_candidate
+            .as_ref()
+            .and_then(|path| file_dialog::show_delete_confirmation(ctx, path));
+        match response {
+            Some(DialogResponse::Apply) => self.confirm_delete_candidate(),
+            Some(DialogResponse::Cancel) => self.delete_candidate = None,
+            None => {}
+        }
+    }
 }
 
 impl eframe::App for LiteDevCppApp {
@@ -244,15 +408,15 @@ impl eframe::App for LiteDevCppApp {
             .show(ctx, |ui| {
                 ui.heading("Project");
                 ui.separator();
-                let mut selected_file = None;
+                let mut action = None;
                 file_tree::show(
                     ui,
                     self.project.as_ref(),
                     self.current_file.as_deref(),
-                    &mut selected_file,
+                    &mut action,
                 );
-                if let Some(path) = selected_file {
-                    self.open_file(path);
+                if let Some(action) = action {
+                    self.handle_file_tree_action(ctx, action);
                 }
             });
 
@@ -270,6 +434,9 @@ impl eframe::App for LiteDevCppApp {
                 &mut self.dirty,
             );
         });
+
+        self.draw_file_dialog(ctx);
+        self.draw_delete_confirmation(ctx);
     }
 }
 

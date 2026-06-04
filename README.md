@@ -1,6 +1,6 @@
 # Lite Dev-C++
 
-`Lite Dev-C++` is a lightweight C/C++ IDE for macOS, inspired by the workflow of Dev-C++.
+`Lite Dev-C++` is a lightweight C/C++ editor for macOS, written in Rust, inspired by Dev-C++.
 
 Basic Functions: open a folder, edit C/C++ files, build the current source file, and run the produced executable without installing a heavy IDE.
 
@@ -58,6 +58,7 @@ cpp_compiler = "clang++"
 
 - Open a local folder as a project.
 - Browse a simple file tree.
+- Use file tree context menus for opening, revealing, copying paths, creating, renaming, deleting, and refreshing items.
 - Open, edit, and save `.c`, `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp`, `.hh`, and `.hxx` files.
 - Configure C and C++ compiler commands.
 - Build the current `.c`/`.cpp`/`.cc`/`.cxx` file into an executable named `a` beside the source file.
