@@ -1,52 +1,55 @@
+<div align="center">
+
+<img src="assets/lite-dev-cpp.png" alt="Lite Dev-C++ logo" width="120">
+
 # Lite Dev-C++
 
-`Lite Dev-C++` is a lightweight C/C++ editor for macOS, written in Rust, inspired by Dev-C++.
+A lightweight C/C++ editor for macOS, built with Rust and inspired by Dev-C++.
 
-Basic Functions: open a folder, edit C/C++ files, build the current source file, and run the produced executable without installing a heavy IDE.
+[![Release](https://img.shields.io/github/v/release/AlightSoulmate/Lite-Dev-Cpp)](https://github.com/AlightSoulmate/Lite-Dev-Cpp/releases/latest)
+[![Release Build](https://github.com/AlightSoulmate/Lite-Dev-Cpp/actions/workflows/release.yml/badge.svg)](https://github.com/AlightSoulmate/Lite-Dev-Cpp/actions/workflows/release.yml)
+[![License](https://img.shields.io/github/license/AlightSoulmate/Lite-Dev-Cpp)](https://github.com/AlightSoulmate/Lite-Dev-Cpp/blob/main/LICENSE)
+![Rust](https://img.shields.io/badge/built%20with-Rust-orange?logo=rust)
 
-## Download
+Open folders, edit C/C++ files, and build and run programs without installing a heavyweight IDE.
 
-Download the latest release for your operating system:
+[Download the latest release](https://github.com/AlightSoulmate/Lite-Dev-Cpp/releases/latest)
 
-- macOS: download the `.dmg` or `.app.zip` package.
+</div>
 
-## Requirements
+## Features
 
-Lite Dev-C++ does not include a C/C++ compiler. Install one separately before building code.
+- Lightweight native macOS application.
+- Folder-based workflow with a built-in file tree.
+- Editing for common C/C++ source and header files.
+- Syntax highlighting, automatic indentation, and paired brackets and quotes.
+- Configurable C and C++ compiler commands.
+- One-click build and run with compiler output shown inside the app.
+- System terminal support for programs that read from standard input.
 
-macOS:
+## Quick Start
 
-- Install Xcode Command Line Tools:
+1. Install the Xcode Command Line Tools if they are not already available:
 
-```sh
-xcode-select --install
-```
+   ```sh
+   xcode-select --install
+   ```
 
-This provides `clang` and `clang++`. (clang does not support `bits/stdc++.h`, it needs to be created manually.)
+2. Download `Lite-Dev-Cpp-macOS-universal.zip` from the [latest release](https://github.com/AlightSoulmate/Lite-Dev-Cpp/releases/latest), extract it, and open the app.
+3. Open a folder, select a C or C++ source file, then click `Build & Run`.
 
-## Basic Usage
-
-1. Launch Lite Dev-C++.
-2. Click `Open Folder` and choose a folder containing C/C++ files.
-3. Select a `.c`, `.cpp`, `.cc`, `.cxx`, `.h`, or `.hpp` file from the file tree.
-4. Edit the file in the center editor.
-5. Click `Save File`.
-6. Click `Build` to compile the current source file.
-7. Click `Run` to run the last built executable in a system terminal.
-8. Click `Build & Run` to compile and run in one step.
+> [!NOTE]
+> Lite Dev-C++ does not include a C/C++ compiler. The Xcode Command Line Tools provide `clang` and `clang++` on macOS.
 
 ## Compiler Configuration
 
-Edit the compiler fields in the top toolbar, then click `Save Config`.
-The compiler settings are stored in the user's app config directory, not in the opened project folder.
-
-On macOS, the config file is:
+The compiler commands can be changed in the top toolbar. Click `Save Config` to store them in the macOS application configuration directory:
 
 ```text
 ~/Library/Application Support/dev.LiteDevCpp.Lite-Dev-C++/config.toml
 ```
 
-Example:
+Default configuration:
 
 ```toml
 [compiler]
@@ -54,28 +57,32 @@ c_compiler = "clang"
 cpp_compiler = "clang++"
 ```
 
-## Current Features
+## Supported Files
 
-- Open a local folder as a project.
-- Browse a simple file tree.
-- Use file tree context menus for opening, revealing, copying paths, creating, renaming, deleting, and refreshing items.
-- Open, edit, and save `.c`, `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp`, `.hh`, and `.hxx` files.
-- Configure C and C++ compiler commands.
-- Build the current `.c`/`.cpp`/`.cc`/`.cxx` file into an executable named `a` beside the source file.
-- Run the last built executable in a system terminal.
-- Build and run the current source file with one toolbar action.
-- Capture build stdout and stderr into the bottom output panel.
-- Basic C/C++ editor highlighting, auto-paired brackets/quotes, Tab-to-spaces, and indentation after newlines.
+Lite Dev-C++ can open and edit `.c`, `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp`, `.hh`, and `.hxx` files. Builds are available for `.c`, `.cpp`, `.cc`, and `.cxx` source files.
 
-## Build Behavior
+The compiled executable is named `a` and written beside the current source file. Building another source file in the same folder replaces that executable.
 
-- `.c` files use the configured C compiler, defaulting to `clang`.
-- `.cpp`, `.cc`, and `.cxx` files use the configured C++ compiler, defaulting to `clang++`.
-- Output executables are written as `a` in the current source file's folder.
-- Building another source file in the same folder overwrites that same `a` executable.
-- `Run` and `Build & Run` launch a system terminal so programs using `cin`, `scanf`, or other stdin reads can wait for user input.
+## Current Limitations
 
-## Status
+Lite Dev-C++ is an early, minimal editor rather than a full IDE. It does not yet include:
 
-Lite Dev-C++ is currently a minimal working version, not a full IDE.
-It does not yet include a debugger, project templates, full code completion, or integrated `clangd`.
+- A debugger.
+- Project templates.
+- Full code completion or integrated `clangd` diagnostics.
+- Multi-file project build configuration.
+- macOS code signing and notarization.
+
+Because the current macOS release is unsigned, macOS may require you to approve the app manually in **System Settings → Privacy & Security** before opening it.
+
+## Development
+
+The application is written in Rust with `egui`/`eframe`. To run it from source:
+
+```sh
+cargo run
+```
+
+## License
+
+Lite Dev-C++ is available under the [MIT License](LICENSE).

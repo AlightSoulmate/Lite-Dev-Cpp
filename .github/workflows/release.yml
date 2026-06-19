@@ -41,6 +41,7 @@ jobs:
           cp packaging/macos/Info.plist "$APP_DIR/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP_DIR/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP_DIR/Contents/Info.plist"
+          cp packaging/macos/LiteDevCpp.icns "$APP_DIR/Contents/Resources/LiteDevCpp.icns"
           cp target/universal/release/lite-dev-cpp "$APP_DIR/Contents/MacOS/lite-dev-cpp"
           chmod +x "$APP_DIR/Contents/MacOS/lite-dev-cpp"
           ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "Lite-Dev-Cpp-macOS-universal.zip"

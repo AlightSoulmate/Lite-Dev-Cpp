@@ -9,6 +9,8 @@
   <string>Lite Dev-C++</string>
   <key>CFBundleExecutable</key>
   <string>lite-dev-cpp</string>
+  <key>CFBundleIconFile</key>
+  <string>LiteDevCpp</string>
   <key>CFBundleIdentifier</key>
   <string>io.github.litedevcpp</string>
   <key>CFBundleInfoDictionaryVersion</key>
