@@ -61,7 +61,7 @@ cpp_compiler = "clang++"
 
 Lite Dev-C++ can open and edit `.c`, `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp`, `.hh`, and `.hxx` files. Builds are available for `.c`, `.cpp`, `.cc`, and `.cxx` source files.
 
-The compiled executable is named `a` and written beside the current source file. Building another source file in the same folder replaces that executable.
+Build artifacts are written to a temporary application directory instead of beside the source file, so existing project files are not overwritten.
 
 ## Current Limitations
 

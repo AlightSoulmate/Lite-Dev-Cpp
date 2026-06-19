@@ -21,3 +21,18 @@ fn extension_lower(path: &Path) -> Option<String> {
         .and_then(|ext| ext.to_str())
         .map(|ext| ext.to_ascii_lowercase())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{is_c_source, is_cpp_source, is_supported_source};
+    use std::path::Path;
+
+    #[test]
+    fn recognizes_supported_source_extensions_case_insensitively() {
+        assert!(is_c_source(Path::new("main.C")));
+        assert!(is_cpp_source(Path::new("main.CPP")));
+        assert!(is_cpp_source(Path::new("main.cxx")));
+        assert!(!is_supported_source(Path::new("main.hpp")));
+        assert!(!is_supported_source(Path::new("README")));
+    }
+}

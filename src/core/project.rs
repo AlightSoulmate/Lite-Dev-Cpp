@@ -54,7 +54,8 @@ fn read_children(root: &Path) -> io::Result<Vec<FileNode>> {
             continue;
         }
 
-        let is_dir = path.is_dir();
+        let file_type = entry.file_type()?;
+        let is_dir = file_type.is_dir();
         let children = if is_dir {
             read_children(&path).unwrap_or_default()
         } else {
@@ -79,5 +80,18 @@ fn read_children(root: &Path) -> io::Result<Vec<FileNode>> {
 }
 
 fn should_skip(name: &str) -> bool {
-    matches!(name, ".git" | "target" | ".DS_Store" | "a")
+    matches!(name, ".git" | "target" | ".DS_Store")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_skip;
+
+    #[test]
+    fn skips_internal_project_entries_only() {
+        assert!(should_skip(".git"));
+        assert!(should_skip("target"));
+        assert!(!should_skip("a"));
+        assert!(!should_skip("main.cpp"));
+    }
 }

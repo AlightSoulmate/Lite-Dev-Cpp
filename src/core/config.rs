@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 // App and compiler config
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub compiler: CompilerConfig,
@@ -61,14 +61,6 @@ impl AppConfig {
                     "could not find the user config directory",
                 )
             })
-    }
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            compiler: CompilerConfig::default(),
-        }
     }
 }
 

@@ -12,7 +12,11 @@ pub fn show(ui: &mut egui::Ui, title: &str, text: &mut String, dirty: &mut bool)
 
     if title == "No file open" {
         ui.centered_and_justified(|ui| {
-            ui.label("Open a C/C++ file from the project tree.");
+            ui.vertical_centered(|ui| {
+                ui.heading("Lite Dev-C++");
+                ui.add_space(4.0);
+                ui.label("Open a folder, then select a C/C++ file from the project tree.");
+            });
         });
         return;
     }
@@ -54,14 +58,13 @@ pub fn show(ui: &mut egui::Ui, title: &str, text: &mut String, dirty: &mut bool)
             .cursor_range
             .and_then(|range| range.single())
             .map(|cursor| cursor.ccursor.index)
+            && let Some(next_cursor_index) = apply_edit_assists(&before, text, cursor_index)
         {
-            if let Some(next_cursor_index) = apply_edit_assists(&before, text, cursor_index) {
-                output
-                    .state
-                    .cursor
-                    .set_char_range(Some(CCursorRange::one(CCursor::new(next_cursor_index))));
-                output.state.store(ui.ctx(), output.response.id);
-            }
+            output
+                .state
+                .cursor
+                .set_char_range(Some(CCursorRange::one(CCursor::new(next_cursor_index))));
+            output.state.store(ui.ctx(), output.response.id);
         }
         *dirty = true;
     }
@@ -397,4 +400,27 @@ fn is_builtin_type(word: &str) -> bool {
             | "tuple"
             | "priority_queue"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_edit_assists, inserted_text, quoted_len};
+
+    #[test]
+    fn detects_inserted_text() {
+        assert_eq!(inserted_text("abc", "abXc").as_deref(), Some("X"));
+        assert_eq!(inserted_text("abc", "ac"), None);
+    }
+
+    #[test]
+    fn inserts_matching_bracket_without_moving_cursor() {
+        let mut text = "(".to_owned();
+        assert_eq!(apply_edit_assists("", &mut text, 1), Some(1));
+        assert_eq!(text, "()");
+    }
+
+    #[test]
+    fn quoted_length_respects_escaped_quotes() {
+        assert_eq!(quoted_len(br#""a\"b" tail"#, b'\"'), 6);
+    }
 }

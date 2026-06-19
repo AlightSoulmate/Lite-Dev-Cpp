@@ -1,4 +1,7 @@
 use std::{
+    collections::hash_map::DefaultHasher,
+    env, fs,
+    hash::{Hash, Hasher},
     io,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -27,7 +30,7 @@ impl CompilerService {
     pub fn build_current_file(&self, source: &Path) -> io::Result<BuildResult> {
         let compiler = self.compiler_for_source(source)?;
         let source_dir = source_parent(source)?;
-        let executable = source_dir.join("a");
+        let executable = build_output_path(source)?;
 
         let output = Command::new(compiler)
             .arg(source)
@@ -84,6 +87,21 @@ impl CompilerService {
     }
 }
 
+fn build_output_path(source: &Path) -> io::Result<PathBuf> {
+    let mut hasher = DefaultHasher::new();
+    source.hash(&mut hasher);
+    let build_dir = env::temp_dir()
+        .join("lite-dev-cpp")
+        .join(format!("{:016x}", hasher.finish()));
+    fs::create_dir_all(&build_dir)?;
+
+    let executable_name = source
+        .file_stem()
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| std::ffi::OsStr::new("program"));
+    Ok(build_dir.join(executable_name))
+}
+
 fn shell_quote(path: &Path) -> String {
     let value = path.to_string_lossy();
     format!("'{}'", value.replace('\'', "'\\''"))
@@ -97,4 +115,23 @@ fn source_parent(source: &Path) -> io::Result<&Path> {
     source
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "source file has no parent"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apple_script_string, shell_quote};
+    use std::path::Path;
+
+    #[test]
+    fn shell_quote_escapes_single_quotes() {
+        assert_eq!(
+            shell_quote(Path::new("/tmp/it's here")),
+            "'/tmp/it'\\''s here'"
+        );
+    }
+
+    #[test]
+    fn apple_script_string_escapes_special_characters() {
+        assert_eq!(apple_script_string("a\\b\"c"), "\"a\\\\b\\\"c\"");
+    }
 }

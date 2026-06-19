@@ -1,6 +1,9 @@
 use std::{
-    fs,
+    fs, io,
     path::{Path, PathBuf},
+    sync::mpsc::{self, Receiver, TryRecvError},
+    thread,
+    time::Duration,
 };
 
 use eframe::egui::{self, FontData, FontDefinitions, FontFamily};
@@ -13,7 +16,7 @@ use crate::core::{
 };
 use crate::ui::{
     editor,
-    file_dialog::{self, DialogResponse, FileDialogKind, FileDialogState},
+    file_dialog::{self, DialogResponse, FileDialogKind, FileDialogState, UnsavedResponse},
     file_tree::{self, FileTreeAction},
     output_panel,
 };
@@ -29,28 +32,48 @@ pub struct LiteDevCppApp {
     last_executable: Option<PathBuf>,
     file_dialog: Option<FileDialogState>,
     delete_candidate: Option<PathBuf>,
+    pending_action: Option<PendingAction>,
+    allow_close: bool,
+    build_receiver: Option<Receiver<io::Result<BuildResult>>>,
+    run_after_build: bool,
+}
+
+enum PendingAction {
+    OpenFolder(PathBuf),
+    OpenFile(PathBuf),
+    Close,
 }
 
 impl LiteDevCppApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         configure_fonts(&cc.egui_ctx);
-        let config = AppConfig::load().unwrap_or_default();
+        let (config, output) = match AppConfig::load() {
+            Ok(config) => (config, "Open a folder to begin.\n".to_owned()),
+            Err(err) => (
+                AppConfig::default(),
+                format!("Could not load config; using defaults: {err}\n"),
+            ),
+        };
         Self {
             project: None,
             config,
             current_file: None,
             editor_text: String::new(),
             dirty: false,
-            output: "Open a folder to begin.\n".to_owned(),
+            output,
             last_executable: None,
             file_dialog: None,
             delete_candidate: None,
+            pending_action: None,
+            allow_close: false,
+            build_receiver: None,
+            run_after_build: false,
         }
     }
 
     fn open_folder_dialog(&mut self) {
         if let Some(folder) = rfd::FileDialog::new().pick_folder() {
-            self.open_folder(folder);
+            self.request_action(PendingAction::OpenFolder(folder));
         }
     }
 
@@ -70,12 +93,14 @@ impl LiteDevCppApp {
 
     fn open_file(&mut self, path: PathBuf) {
         if self.dirty {
-            self.push_output(
-                "Current file has unsaved changes. Save it before opening another file.",
-            );
+            self.pending_action = Some(PendingAction::OpenFile(path));
             return;
         }
 
+        self.open_file_now(path);
+    }
+
+    fn open_file_now(&mut self, path: PathBuf) {
         match std::fs::read_to_string(&path) {
             Ok(contents) => {
                 self.current_file = Some(path.clone());
@@ -88,18 +113,22 @@ impl LiteDevCppApp {
         }
     }
 
-    fn save_current_file(&mut self) {
+    fn save_current_file(&mut self) -> bool {
         let Some(path) = self.current_file.as_ref() else {
             self.push_output("No file is open.");
-            return;
+            return false;
         };
 
         match std::fs::write(path, &self.editor_text) {
             Ok(()) => {
                 self.dirty = false;
                 self.push_output(format!("Saved file: {}", path.display()));
+                true
             }
-            Err(err) => self.push_output(format!("Could not save file {}: {err}", path.display())),
+            Err(err) => {
+                self.push_output(format!("Could not save file {}: {err}", path.display()));
+                false
+            }
         }
     }
 
@@ -110,48 +139,101 @@ impl LiteDevCppApp {
         }
     }
 
+    fn request_action(&mut self, action: PendingAction) {
+        if self.dirty {
+            self.pending_action = Some(action);
+        } else {
+            self.perform_action(action, None);
+        }
+    }
+
+    fn perform_action(&mut self, action: PendingAction, ctx: Option<&egui::Context>) {
+        match action {
+            PendingAction::OpenFolder(folder) => self.open_folder(folder),
+            PendingAction::OpenFile(path) => self.open_file_now(path),
+            PendingAction::Close => {
+                self.allow_close = true;
+                if let Some(ctx) = ctx {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+        }
+    }
+
     fn build_current_file(&mut self) {
-        let _ = self.build_current_file_inner();
+        self.start_build(false);
     }
 
     fn build_and_run_current_file(&mut self) {
-        if let Some(result) = self.build_current_file_inner() {
-            if result.exit_code == 0 {
-                self.run_last_executable();
+        self.start_build(true);
+    }
+
+    fn start_build(&mut self, run_after_build: bool) {
+        if self.build_receiver.is_some() {
+            self.push_output("A build is already running.");
+            return;
+        }
+
+        if self.dirty && !self.save_current_file() {
+            self.push_output("Build cancelled because the file could not be saved.");
+            return;
+        }
+
+        let Some(file) = self.current_file.clone() else {
+            self.push_output("Open a C/C++ file before building.");
+            return;
+        };
+
+        if !paths::is_supported_source(&file) {
+            self.push_output("The current file is not a supported C/C++ source file.");
+            return;
+        }
+
+        let service = CompilerService::new(self.config.compiler.clone());
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = sender.send(service.build_current_file(&file));
+        });
+
+        self.last_executable = None;
+        self.build_receiver = Some(receiver);
+        self.run_after_build = run_after_build;
+        self.push_output("Build started...");
+    }
+
+    fn poll_build(&mut self, ctx: &egui::Context) {
+        let message = match self.build_receiver.as_ref() {
+            Some(receiver) => receiver.try_recv(),
+            None => return,
+        };
+
+        match message {
+            Ok(result) => {
+                self.build_receiver = None;
+                self.finish_build(result);
+            }
+            Err(TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(50)),
+            Err(TryRecvError::Disconnected) => {
+                self.build_receiver = None;
+                self.run_after_build = false;
+                self.push_output("Build worker stopped unexpectedly.");
             }
         }
     }
 
-    fn build_current_file_inner(&mut self) -> Option<BuildResult> {
-        if self.dirty {
-            self.save_current_file();
-        }
-
-        let Some(file) = self.current_file.as_ref() else {
-            self.push_output("Open a C/C++ file before building.");
-            return None;
-        };
-
-        if !paths::is_supported_source(file) {
-            self.push_output("The current file is not a supported C/C++ source file.");
-            return None;
-        }
-
-        let service = CompilerService::new(self.config.compiler.clone());
-        match service.build_current_file(file) {
+    fn finish_build(&mut self, result: io::Result<BuildResult>) {
+        let run_after_build = std::mem::take(&mut self.run_after_build);
+        match result {
             Ok(result) => {
                 if result.exit_code == 0 {
                     self.last_executable = Some(result.executable.clone());
-                } else {
-                    self.last_executable = None;
                 }
                 self.append_build_result("Build", &result);
-                Some(result)
+                if result.exit_code == 0 && run_after_build {
+                    self.run_last_executable();
+                }
             }
-            Err(err) => {
-                self.push_output(format!("Build failed: {err}"));
-                None
-            }
+            Err(err) => self.push_output(format!("Build failed: {err}")),
         }
     }
 
@@ -272,8 +354,10 @@ impl LiteDevCppApp {
     fn rename_path(&mut self, path: &Path, new_name: &str) -> Result<String, String> {
         let new_path = file_ops::rename_path(path, new_name)?;
 
-        if self.current_file.as_deref() == Some(path) {
-            self.current_file = Some(new_path.clone());
+        if let Some(current_file) = self.current_file.as_ref()
+            && let Ok(relative) = current_file.strip_prefix(path)
+        {
+            self.current_file = Some(new_path.join(relative));
             self.last_executable = None;
         }
 
@@ -311,6 +395,7 @@ impl LiteDevCppApp {
     fn push_output(&mut self, message: impl AsRef<str>) {
         self.output.push_str(message.as_ref());
         self.output.push('\n');
+        self.trim_output();
     }
 
     fn append_build_result(&mut self, label: &str, result: &BuildResult) {
@@ -332,6 +417,20 @@ impl LiteDevCppApp {
         if label == "Build" {
             self.push_output(format!("Executable: {}", result.executable.display()));
         }
+        self.trim_output();
+    }
+
+    fn trim_output(&mut self) {
+        const MAX_OUTPUT_BYTES: usize = 200_000;
+        if self.output.len() <= MAX_OUTPUT_BYTES {
+            return;
+        }
+
+        let mut start = self.output.len() - MAX_OUTPUT_BYTES;
+        while !self.output.is_char_boundary(start) {
+            start += 1;
+        }
+        self.output.drain(..start);
     }
 
     fn current_title(&self) -> String {
@@ -343,31 +442,70 @@ impl LiteDevCppApp {
     }
 
     fn draw_toolbar(&mut self, ui: &mut egui::Ui) {
-        if ui.button("Open Folder").clicked() {
-            self.open_folder_dialog();
-        }
-        if ui.button("Save File").clicked() {
-            self.save_current_file();
-        }
-        if ui.button("Build").clicked() {
-            self.build_current_file();
-        }
-        if ui.button("Build & Run").clicked() {
-            self.build_and_run_current_file();
-        }
-        if ui.button("Run").clicked() {
-            self.run_last_executable();
-        }
-        if ui.button("Refresh").clicked() {
-            self.refresh_project();
-        }
+        let building = self.build_receiver.is_some();
+        let has_file = self.current_file.is_some();
+        let can_build = self
+            .current_file
+            .as_deref()
+            .is_some_and(paths::is_supported_source)
+            && !building;
 
-        ui.separator();
-        compiler_field(ui, "C", &mut self.config.compiler.c_compiler);
-        compiler_field(ui, "C++", &mut self.config.compiler.cpp_compiler);
-        if ui.button("Save Config").clicked() {
-            self.save_app_config();
-        }
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            if ui.button("Open Folder…").clicked() {
+                self.open_folder_dialog();
+            }
+            if ui
+                .add_enabled(has_file, egui::Button::new("Save"))
+                .clicked()
+            {
+                self.save_current_file();
+            }
+            ui.separator();
+            if ui
+                .add_enabled(can_build, egui::Button::new("Build"))
+                .clicked()
+            {
+                self.build_current_file();
+            }
+            if ui
+                .add_enabled(can_build, egui::Button::new("Build & Run"))
+                .clicked()
+            {
+                self.build_and_run_current_file();
+            }
+            if ui
+                .add_enabled(
+                    self.last_executable.is_some() && !building,
+                    egui::Button::new("Run"),
+                )
+                .clicked()
+            {
+                self.run_last_executable();
+            }
+            if ui
+                .add_enabled(self.project.is_some(), egui::Button::new("Refresh"))
+                .clicked()
+            {
+                self.refresh_project();
+            }
+            if building {
+                ui.separator();
+                ui.spinner();
+                ui.label("Building…");
+            }
+        });
+
+        ui.add_space(3.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            ui.strong("Compilers");
+            compiler_field(ui, "C:", &mut self.config.compiler.c_compiler);
+            compiler_field(ui, "C++:", &mut self.config.compiler.cpp_compiler);
+            if ui.button("Save Config").clicked() {
+                self.save_app_config();
+            }
+        });
     }
 
     fn draw_file_dialog(&mut self, ctx: &egui::Context) {
@@ -393,12 +531,48 @@ impl LiteDevCppApp {
             None => {}
         }
     }
+
+    fn draw_unsaved_confirmation(&mut self, ctx: &egui::Context) {
+        if self.pending_action.is_none() {
+            return;
+        }
+
+        match file_dialog::show_unsaved_confirmation(ctx) {
+            Some(UnsavedResponse::Save) => {
+                if self.save_current_file()
+                    && let Some(action) = self.pending_action.take()
+                {
+                    self.perform_action(action, Some(ctx));
+                }
+            }
+            Some(UnsavedResponse::Discard) => {
+                if let Some(action) = self.pending_action.take() {
+                    self.perform_action(action, Some(ctx));
+                }
+            }
+            Some(UnsavedResponse::Cancel) => self.pending_action = None,
+            None => {}
+        }
+    }
+
+    fn handle_close_request(&mut self, ctx: &egui::Context) {
+        let close_requested = ctx.input(|input| input.viewport().close_requested());
+        if close_requested && self.dirty && !self.allow_close {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.pending_action = Some(PendingAction::Close);
+        }
+    }
 }
 
 impl eframe::App for LiteDevCppApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_build(ctx);
+        self.handle_close_request(ctx);
+
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| self.draw_toolbar(ui));
+            ui.add_space(4.0);
+            self.draw_toolbar(ui);
+            ui.add_space(4.0);
         });
 
         egui::SidePanel::left("file_tree")
@@ -437,6 +611,16 @@ impl eframe::App for LiteDevCppApp {
 
         self.draw_file_dialog(ctx);
         self.draw_delete_confirmation(ctx);
+        self.draw_unsaved_confirmation(ctx);
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // macOS handles Command-Q at the application level, before egui can
+        // cancel the window close. Persist the active buffer so that shortcut
+        // can never discard edits silently.
+        if self.dirty {
+            let _ = self.save_current_file();
+        }
     }
 }
 
